@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lightpanda-mcp-server"
+version = "1.0.0"
+description = "Universal fast Model Context Protocol (MCP) server for Lightpanda headless browser"
+readme = "README.md"
+authors = [{ name = "Guilherme Brilhante" }]
+license = { text = "MIT" }
+requires-python = ">=3.8"
+keywords = ["mcp", "lightpanda", "ai-agent", "opencode", "claude", "codex"]
+
+[project.urls]
+Homepage = "https://github.com/Brilhante29/lightpanda-mcp-server"

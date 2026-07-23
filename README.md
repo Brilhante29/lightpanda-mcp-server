@@ -2,27 +2,103 @@
 
 [![MCP Standard](https://img.shields.io/badge/MCP-2024--11--05-blue.svg)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://golang.org)
 [![NPM](https://img.shields.io/badge/NPM-npx_lightpanda--mcp--server-red?logo=npm)](https://npmjs.com)
+[![Bun](https://img.shields.io/badge/Bun-bunx_lightpanda--mcp--server-fbf0df?logo=bun)](https://bun.sh)
+[![Go](https://img.shields.io/badge/Go-go_install-00ADD8?logo=go)](https://golang.org)
+[![Python](https://img.shields.io/badge/Python-uvx_lightpanda--mcp--server-3776ab?logo=python)](https://pypi.org)
 
-A **100% project-agnostic, standalone Model Context Protocol (MCP) server** for [Lightpanda](https://lightpanda.io) — the ultra-fast AI-native headless browser (16x lower memory footprint than Chrome).
+A **100% project-agnostic, multi-runtime Model Context Protocol (MCP) server** for [Lightpanda](https://lightpanda.io) — the ultra-fast AI-native headless browser (16x lower memory footprint than Chrome).
 
-Connects **OpenCode, Claude Code, Codex, Antigravity, Cursor, Windsurf, or LangChain** to Lightpanda over standard MCP JSON-RPC 2.0.
+Supports **NPM, Bun, PNPM, Yarn, Go, Python/UVX**, and connects **OpenCode, Claude Code, Codex, Antigravity, Cursor, Windsurf, or LangChain** seamlessly!
 
 ---
 
-## 🚀 3 Ways to Use (100% Project-Agnostic)
+## 🚀 Installation & Execution Methods
 
-### 📦 Way 1: Global Go Install (`go install`)
-
-Install globally to your system with a single command:
+### ⚡ 1. NPM / NPX (Node.js)
 
 ```bash
+# Zero-install execution via NPX
+npx lightpanda-mcp-server
+
+# Or global install
+npm install -g lightpanda-mcp-server
+```
+
+**MCP Config:**
+```json
+{
+  "mcpServers": {
+    "lightpanda": {
+      "command": "npx",
+      "args": ["-y", "lightpanda-mcp-server"]
+    }
+  }
+}
+```
+
+---
+
+### 🥟 2. BUN / BUNX
+
+```bash
+# Zero-install execution via Bunx
+bunx lightpanda-mcp-server
+
+# Or global install via Bun
+bun add -g lightpanda-mcp-server
+```
+
+**MCP Config:**
+```json
+{
+  "mcpServers": {
+    "lightpanda": {
+      "command": "bunx",
+      "args": ["lightpanda-mcp-server"]
+    }
+  }
+}
+```
+
+---
+
+### 📦 3. PNPM / DLX
+
+```bash
+pnpm dlx lightpanda-mcp-server
+```
+
+**MCP Config:**
+```json
+{
+  "mcpServers": {
+    "lightpanda": {
+      "command": "pnpm",
+      "args": ["dlx", "lightpanda-mcp-server"]
+    }
+  }
+}
+```
+
+---
+
+### 🧶 4. YARN / DLX
+
+```bash
+yarn dlx lightpanda-mcp-server
+```
+
+---
+
+### 🐹 5. GO (`go install` / `go run`)
+
+```bash
+# Global Go install
 go install github.com/Brilhante29/lightpanda-mcp-server@latest
 ```
 
-Then in **OpenCode, Claude Code, Codex, Cursor, or Antigravity**, your MCP configuration is **100% project-agnostic**:
-
+**MCP Config:**
 ```json
 {
   "mcpServers": {
@@ -35,33 +111,19 @@ Then in **OpenCode, Claude Code, Codex, Cursor, or Antigravity**, your MCP confi
 
 ---
 
-### 📦 Way 2: Dynamic `go run` (GitHub Direct Execution)
+### 🐍 6. PYTHON / UVX (`pip` / `uvx`)
 
-Run directly from GitHub without installing anything locally:
-
-```json
-{
-  "mcpServers": {
-    "lightpanda": {
-      "command": "go",
-      "args": ["run", "github.com/Brilhante29/lightpanda-mcp-server@latest"]
-    }
-  }
-}
+```bash
+uvx lightpanda-mcp-server
 ```
 
----
-
-### 📦 Way 3: Zero-Install NPX (`npx`)
-
-Run via NPX:
-
+**MCP Config:**
 ```json
 {
   "mcpServers": {
     "lightpanda": {
-      "command": "npx",
-      "args": ["-y", "lightpanda-mcp-server"]
+      "command": "uvx",
+      "args": ["lightpanda-mcp-server"]
     }
   }
 }

@@ -2,13 +2,18 @@
   "name": "lightpanda-mcp-server",
   "version": "1.0.0",
   "description": "Universal, fast Model Context Protocol (MCP) server for Lightpanda headless browser",
-  "main": "bin/cli.js",
+  "main": "index.js",
   "bin": {
     "lightpanda-mcp-server": "bin/cli.js"
   },
   "scripts": {
-    "build": "go build -o bin/lightpanda-mcp-server main.go",
-    "start": "bin/cli.js"
+    "start": "node index.js",
+    "bun": "bun index.js",
+    "build": "go build -o bin/lightpanda-mcp-server main.go"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Brilhante29/lightpanda-mcp-server.git"
   },
   "keywords": [
     "mcp",
@@ -19,8 +24,11 @@
     "claude",
     "codex",
     "antigravity",
-    "cursor"
+    "cursor",
+    "bun",
+    "npm",
+    "pnpm"
   ],
-  "author": "Lightpanda Community",
+  "author": "Guilherme Brilhante",
   "license": "MIT"
 }
