@@ -20,9 +20,13 @@ const rl = readline.createInterface({
 });
 
 rl.on('line', (line) => {
-  if (!line.trim()) return;
+  let cleaned = line.trim();
+  if (!cleaned) return;
+  if ((cleaned.startsWith("'") && cleaned.endsWith("'")) || (cleaned.startsWith('"') && cleaned.endsWith('"'))) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
   try {
-    const req = JSON.parse(line);
+    const req = JSON.parse(cleaned);
     handleRequest(req);
   } catch (err) {
     sendError(null, -32700, 'Parse error');

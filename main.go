@@ -87,9 +87,14 @@ func main() {
 	scanner.Buffer(buf, 10*1024*1024)
 
 	for scanner.Scan() {
-		line := scanner.Bytes()
+		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 {
 			continue
+		}
+
+		if (bytes.HasPrefix(line, []byte("'")) && bytes.HasSuffix(line, []byte("'"))) ||
+			(bytes.HasPrefix(line, []byte("\"")) && bytes.HasSuffix(line, []byte("\""))) {
+			line = bytes.TrimSpace(line[1 : len(line)-1])
 		}
 
 		var req Request
