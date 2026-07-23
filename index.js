@@ -7,11 +7,14 @@
 
 const readline = require('readline');
 const http = require('http');
+const https = require('https');
 const net = require('net');
 const { exec } = require('child_process');
 
 const LIGHTPANDA_HOST = process.env.LIGHTPANDA_HOST || '127.0.0.1';
 const LIGHTPANDA_PORT = process.env.LIGHTPANDA_PORT || '9222';
+
+let isDaemonStarting = false;
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -56,7 +59,7 @@ function handleRequest(req) {
             description: 'Fetches HTML content using Lightpanda fast headless browser engine.',
             inputSchema: {
               type: 'object',
-              properties: { url: { type: 'string', description: 'Target URL' } },
+              properties: { url: { type: 'string', description: 'Target URL (http or https)' } },
               required: ['url']
             }
           },
@@ -65,7 +68,7 @@ function handleRequest(req) {
             description: 'Extracts clean Markdown and AX Accessibility Tree via Lightpanda.',
             inputSchema: {
               type: 'object',
-              properties: { url: { type: 'string', description: 'Target URL' } },
+              properties: { url: { type: 'string', description: 'Target URL (http or https)' } },
               required: ['url']
             }
           },
@@ -103,6 +106,8 @@ async function executeToolCall(id, params) {
   const { name, arguments: args } = params || {};
 
   try {
+    await ensureDaemonRunning();
+
     if (name === 'lightpanda_status') {
       const status = await checkStatus();
       sendResponse(id, { content: [{ type: 'text', text: status }] });
@@ -135,18 +140,19 @@ async function executeToolCall(id, params) {
 
 function fetchHTML(targetUrl) {
   return new Promise((resolve, reject) => {
-    http.get(targetUrl, (res) => {
+    const client = targetUrl.startsWith('https') ? https : http;
+    client.get(targetUrl, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => resolve(data));
-    }).on('error', reject);
+    }).on('error', (err) => reject(new Error(`Failed to fetch ${targetUrl}: ${err.message}`)));
   });
 }
 
 function fetchMarkdown(targetUrl) {
   return new Promise((resolve) => {
     exec(`wsl lightpanda fetch ${targetUrl}`, (err, stdout) => {
-      if (!err && stdout) {
+      if (!err && stdout && stdout.trim()) {
         resolve(stdout);
       } else {
         fetchHTML(targetUrl)
@@ -187,11 +193,35 @@ function checkStatus() {
     });
     socket.on('error', () => {
       socket.destroy();
-      resolve(`⚠️ Lightpanda is offline on ${LIGHTPANDA_HOST}:${LIGHTPANDA_PORT}. Launch via \`lightpanda --port 9222\`.`);
+      resolve(`⚠️ Lightpanda daemon starting or offline on ${LIGHTPANDA_HOST}:${LIGHTPANDA_PORT}. Auto-launched background process.`);
     });
     socket.on('timeout', () => {
       socket.destroy();
       resolve(`⚠️ Lightpanda connection timeout on ${LIGHTPANDA_HOST}:${LIGHTPANDA_PORT}`);
+    });
+    socket.connect(LIGHTPANDA_PORT, LIGHTPANDA_HOST);
+  });
+}
+
+function ensureDaemonRunning() {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(1000);
+    socket.on('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on('error', () => {
+      socket.destroy();
+      if (!isDaemonStarting) {
+        isDaemonStarting = true;
+        exec(`wsl bash -c "nohup lightpanda --host 0.0.0.0 --port ${LIGHTPANDA_PORT} >/dev/null 2>&1 &"`);
+      }
+      setTimeout(resolve, 800);
+    });
+    socket.on('timeout', () => {
+      socket.destroy();
+      resolve(false);
     });
     socket.connect(LIGHTPANDA_PORT, LIGHTPANDA_HOST);
   });
