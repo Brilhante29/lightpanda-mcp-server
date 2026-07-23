@@ -1,0 +1,26 @@
+{
+  "name": "lightpanda-mcp-server",
+  "version": "1.0.0",
+  "description": "Universal, fast Model Context Protocol (MCP) server for Lightpanda headless browser",
+  "main": "bin/cli.js",
+  "bin": {
+    "lightpanda-mcp-server": "bin/cli.js"
+  },
+  "scripts": {
+    "build": "go build -o bin/lightpanda-mcp-server main.go",
+    "start": "bin/cli.js"
+  },
+  "keywords": [
+    "mcp",
+    "lightpanda",
+    "headless-browser",
+    "ai-agent",
+    "opencode",
+    "claude",
+    "codex",
+    "antigravity",
+    "cursor"
+  ],
+  "author": "Lightpanda Community",
+  "license": "MIT"
+}
