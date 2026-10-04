@@ -1,154 +1,89 @@
-# 🐼 Lightpanda MCP Server
+# Lightpanda MCP Server
 
-[![MCP Standard](https://img.shields.io/badge/MCP-2024--11--05-blue.svg)](https://modelcontextprotocol.io)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![NPM](https://img.shields.io/badge/NPM-npx_lightpanda--mcp--server-red?logo=npm)](https://npmjs.com)
-[![Bun](https://img.shields.io/badge/Bun-bunx_lightpanda--mcp--server-fbf0df?logo=bun)](https://bun.sh)
-[![Go](https://img.shields.io/badge/Go-go_install-00ADD8?logo=go)](https://golang.org)
-[![Python](https://img.shields.io/badge/Python-uvx_lightpanda--mcp--server-3776ab?logo=python)](https://pypi.org)
+A small, dependency-free [Model Context Protocol](https://modelcontextprotocol.io) server in Go that lets AI agents (Claude Code, Cursor, Windsurf, OpenCode, and other MCP clients) fetch pages and render them with [Lightpanda](https://lightpanda.io), a lightweight headless browser built for automation.
 
-A **100% project-agnostic, multi-runtime Model Context Protocol (MCP) server** for [Lightpanda](https://lightpanda.io) — the ultra-fast AI-native headless browser (16x lower memory footprint than Chrome).
+[![ci](https://github.com/Brilhante29/lightpanda-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/Brilhante29/lightpanda-mcp-server/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)
 
-Supports **NPM, Bun, PNPM, Yarn, Go, Python/UVX**, and connects **OpenCode, Claude Code, Codex, Antigravity, Cursor, Windsurf, or LangChain** seamlessly!
+## Why this exists
 
----
+Agents that browse the web need two things: the raw HTML of a page, and the page as a browser would see it after JavaScript runs. Full Chrome is heavy for that job. Lightpanda renders pages with a much smaller footprint, and this server exposes it to any MCP client over stdio with a deliberately small, safe surface:
 
-## 🚀 Installation & Execution Methods
+- untrusted input never reaches a shell or an interpreter: URLs are validated (`http`/`https` with a host) and passed to the Lightpanda binary as a single argument;
+- responses are size-limited and time-bounded;
+- the server never starts background processes or opens network listeners on its own.
 
-### ⚡ 1. NPM / NPX (Node.js)
+## Tools
 
-```bash
-# Zero-install execution via NPX
-npx lightpanda-mcp-server
+| Tool | What it does | Parameters |
+|---|---|---|
+| `fetch_html` | Fetches raw HTML over HTTP. JavaScript is **not** executed. | `url` |
+| `lightpanda_render_html` | Runs `lightpanda fetch --dump <url>` and returns the rendered HTML (JavaScript executed). | `url` |
+| `lightpanda_status` | Checks whether a Lightpanda CDP server is reachable at `LIGHTPANDA_HOST:LIGHTPANDA_PORT`. | none |
 
-# Or global install
-npm install -g lightpanda-mcp-server
-```
+## Install
 
-**MCP Config:**
-```json
-{
-  "mcpServers": {
-    "lightpanda": {
-      "command": "npx",
-      "args": ["-y", "lightpanda-mcp-server"]
-    }
-  }
-}
-```
-
----
-
-### 🥟 2. BUN / BUNX
+Requires Go 1.22+. For rendering, install the Lightpanda binary from [lightpanda.io](https://lightpanda.io) and make sure it is on `PATH` (or set `LIGHTPANDA_BIN`).
 
 ```bash
-# Zero-install execution via Bunx
-bunx lightpanda-mcp-server
-
-# Or global install via Bun
-bun add -g lightpanda-mcp-server
-```
-
-**MCP Config:**
-```json
-{
-  "mcpServers": {
-    "lightpanda": {
-      "command": "bunx",
-      "args": ["lightpanda-mcp-server"]
-    }
-  }
-}
-```
-
----
-
-### 📦 3. PNPM / DLX
-
-```bash
-pnpm dlx lightpanda-mcp-server
-```
-
-**MCP Config:**
-```json
-{
-  "mcpServers": {
-    "lightpanda": {
-      "command": "pnpm",
-      "args": ["dlx", "lightpanda-mcp-server"]
-    }
-  }
-}
-```
-
----
-
-### 🧶 4. YARN / DLX
-
-```bash
-yarn dlx lightpanda-mcp-server
-```
-
----
-
-### 🐹 5. GO (`go install` / `go run`)
-
-```bash
-# Global Go install
 go install github.com/Brilhante29/lightpanda-mcp-server@latest
 ```
 
-**MCP Config:**
+The npm, Bun, and PyPI packages announced in earlier versions of this README were never published; Go is the supported distribution.
+
+## Configure your MCP client
+
 ```json
 {
   "mcpServers": {
     "lightpanda": {
-      "command": "lightpanda-mcp-server"
+      "command": "lightpanda-mcp-server",
+      "env": { "LIGHTPANDA_BIN": "lightpanda" }
     }
   }
 }
 ```
 
----
+| Variable | Default | Purpose |
+|---|---|---|
+| `LIGHTPANDA_BIN` | `lightpanda` | Path or name of the Lightpanda binary used for rendering |
+| `LIGHTPANDA_HOST` | `127.0.0.1` | Host checked by `lightpanda_status` |
+| `LIGHTPANDA_PORT` | `9222` | CDP port checked by `lightpanda_status` |
 
-### 🐍 6. PYTHON / UVX (`pip` / `uvx`)
+If you run a Lightpanda CDP server for other tools, bind it to localhost (`lightpanda serve --host 127.0.0.1 --port 9222`): a CDP endpoint gives full control of the browser to anyone who can reach it.
+
+## Development
 
 ```bash
-uvx lightpanda-mcp-server
+gofmt -l .
+go vet ./...
+go test -race ./...
 ```
 
-**MCP Config:**
-```json
-{
-  "mcpServers": {
-    "lightpanda": {
-      "command": "uvx",
-      "args": ["lightpanda-mcp-server"]
-    }
-  }
-}
-```
+The tests cover URL validation, argument construction for the Lightpanda subprocess, HTTP fetching against a local server, and the JSON-RPC handling of tool calls, malformed lines, and unknown methods. CI runs the shared [reusable Go workflow](https://github.com/Brilhante29/ci-cd-templates).
 
----
+## Security notes
 
-## 🛠️ Provided MCP Tools
+Version 1.1 removed three behaviors from the first release:
 
-| Tool Name | Description | Parameters |
-| :--- | :--- | :--- |
-| `lightpanda_fetch_html` | Ultra-fast HTML extraction from any URL. | `url` (string) |
-| `lightpanda_get_markdown` | Extracts clean Markdown & Accessibility Tree (AX Tree). | `url` (string) |
-| `lightpanda_execute_js` | Evaluates JavaScript inside Lightpanda headless browser over CDP. | `url` (string), `script` (string) |
-| `lightpanda_status` | Checks local Lightpanda daemon health and CDP WebSocket connectivity. | None |
+- a JavaScript execution tool that interpolated the URL and script into Node.js source, which allowed code execution on the host;
+- a Node.js implementation that passed URLs to a shell command;
+- automatic launching of a Lightpanda daemon bound to `0.0.0.0`.
 
----
+JavaScript execution may return later through a CDP client that sends the script as data, never as source code.
 
-## ⚙️ Environment Variables
+## Roadmap
 
-- `LIGHTPANDA_HOST` (default: `127.0.0.1`): Host IP of local Lightpanda daemon.
-- `LIGHTPANDA_PORT` (default: `9222`): Port of local Lightpanda CDP server.
+- Markdown and accessibility-tree extraction from the rendered DOM.
+- Script evaluation through CDP with explicit opt-in.
+- Release binaries for Linux, macOS, and Windows.
 
----
+## Author
 
-## 📄 License
+**Guilherme Brilhante**, software engineer working on scalable backends and production AI.
+[LinkedIn](https://www.linkedin.com/in/guilhermefreirebrilhanteseveriano/) · [GitHub](https://github.com/Brilhante29)
 
-MIT License &copy; Guilherme Brilhante & Lightpanda Community.
+## License
+
+[MIT](LICENSE). Lightpanda is a separate project with its own license.
