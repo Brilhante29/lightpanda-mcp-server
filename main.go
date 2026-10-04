@@ -1,20 +1,38 @@
+// Command lightpanda-mcp-server is a Model Context Protocol (MCP) server that
+// exposes page fetching and Lightpanda headless rendering to AI agents over
+// stdio (JSON-RPC 2.0, one message per line).
+//
+// Untrusted input never reaches a shell or an interpreter: URLs are validated
+// and passed to the Lightpanda binary as a single argument.
 package main
 
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
-	"sync"
 	"time"
 )
 
-// MCP Protocol Data Structures (JSON-RPC 2.0)
+const (
+	protocolVersion = "2024-11-05"
+	serverVersion   = "1.1.0"
+
+	maxMessageBytes  = 10 << 20
+	maxResponseBytes = 10 << 20
+	fetchTimeout     = 15 * time.Second
+	renderTimeout    = 30 * time.Second
+)
+
+// JSON-RPC 2.0 and MCP data structures.
 
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -70,7 +88,10 @@ type CallToolResult struct {
 var (
 	lightpandaHost = getEnvOrDefault("LIGHTPANDA_HOST", "127.0.0.1")
 	lightpandaPort = getEnvOrDefault("LIGHTPANDA_PORT", "9222")
-	mu             sync.Mutex
+	lightpandaBin  = getEnvOrDefault("LIGHTPANDA_BIN", "lightpanda")
+
+	// output is where responses are written; tests replace it.
+	output io.Writer = os.Stdout
 )
 
 func getEnvOrDefault(key, fallback string) string {
@@ -81,17 +102,19 @@ func getEnvOrDefault(key, fallback string) string {
 }
 
 func main() {
-	scanner := bufio.NewScanner(os.Stdin)
-	// Buffer up to 10MB per line for large HTML/markdown payloads
-	buf := make([]byte, 10*1024*1024)
-	scanner.Buffer(buf, 10*1024*1024)
+	serve(os.Stdin)
+}
+
+func serve(input io.Reader) {
+	scanner := bufio.NewScanner(input)
+	scanner.Buffer(make([]byte, 64*1024), maxMessageBytes)
 
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 {
 			continue
 		}
-
+		// Some clients wrap each message in quotes; tolerate that.
 		if (bytes.HasPrefix(line, []byte("'")) && bytes.HasSuffix(line, []byte("'"))) ||
 			(bytes.HasPrefix(line, []byte("\"")) && bytes.HasSuffix(line, []byte("\""))) {
 			line = bytes.TrimSpace(line[1 : len(line)-1])
@@ -102,8 +125,30 @@ func main() {
 			sendError(nil, -32700, "Parse error")
 			continue
 		}
-
 		handleRequest(&req)
+	}
+}
+
+func tools() []Tool {
+	urlProperty := map[string]Property{
+		"url": {Type: "string", Description: "Absolute http or https URL"},
+	}
+	return []Tool{
+		{
+			Name:        "fetch_html",
+			Description: "Fetches the raw HTML of a URL over HTTP. JavaScript is not executed.",
+			InputSchema: InputSchema{Type: "object", Properties: urlProperty, Required: []string{"url"}},
+		},
+		{
+			Name:        "lightpanda_render_html",
+			Description: "Renders a URL with the Lightpanda headless browser (JavaScript executed) and returns the resulting HTML.",
+			InputSchema: InputSchema{Type: "object", Properties: urlProperty, Required: []string{"url"}},
+		},
+		{
+			Name:        "lightpanda_status",
+			Description: "Checks whether a Lightpanda CDP server is reachable at LIGHTPANDA_HOST:LIGHTPANDA_PORT.",
+			InputSchema: InputSchema{Type: "object", Properties: map[string]Property{}},
+		},
 	}
 }
 
@@ -111,260 +156,155 @@ func handleRequest(req *Request) {
 	switch req.Method {
 	case "initialize":
 		sendResponse(req.ID, map[string]interface{}{
-			"protocolVersion": "2024-11-05",
-			"capabilities": map[string]interface{}{
-				"tools": map[string]interface{}{},
-			},
-			"serverInfo": map[string]interface{}{
-				"name":    "lightpanda-mcp-server",
-				"version": "1.0.0",
-			},
+			"protocolVersion": protocolVersion,
+			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
+			"serverInfo":      map[string]interface{}{"name": "lightpanda-mcp-server", "version": serverVersion},
 		})
-
 	case "notifications/initialized":
-		// No response required for notifications
-
+		// Notifications receive no response.
 	case "tools/list":
-		tools := []Tool{
-			{
-				Name:        "lightpanda_fetch_html",
-				Description: "Fetches HTML content from a URL using Lightpanda fast headless browser engine.",
-				InputSchema: InputSchema{
-					Type: "object",
-					Properties: map[string]Property{
-						"url": {Type: "string", Description: "Target web URL to fetch"},
-					},
-					Required: []string{"url"},
-				},
-			},
-			{
-				Name:        "lightpanda_get_markdown",
-				Description: "Extracts clean Markdown text and Accessibility Tree (AX Tree) from a webpage via Lightpanda.",
-				InputSchema: InputSchema{
-					Type: "object",
-					Properties: map[string]Property{
-						"url": {Type: "string", Description: "Target web URL to parse"},
-					},
-					Required: []string{"url"},
-				},
-			},
-			{
-				Name:        "lightpanda_execute_js",
-				Description: "Executes custom JavaScript inside Lightpanda browser engine over CDP and returns output.",
-				InputSchema: InputSchema{
-					Type: "object",
-					Properties: map[string]Property{
-						"url":    {Type: "string", Description: "Target web URL"},
-						"script": {Type: "string", Description: "JavaScript snippet to execute"},
-					},
-					Required: []string{"url", "script"},
-				},
-			},
-			{
-				Name:        "lightpanda_status",
-				Description: "Checks local Lightpanda daemon health and CDP WebSocket connectivity.",
-				InputSchema: InputSchema{
-					Type:       "object",
-					Properties: map[string]Property{},
-				},
-			},
-		}
-		sendResponse(req.ID, map[string]interface{}{
-			"tools": tools,
-		})
-
+		sendResponse(req.ID, map[string]interface{}{"tools": tools()})
 	case "tools/call":
 		var params ToolCallParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			sendError(req.ID, -32602, "Invalid params")
 			return
 		}
-
-		result := executeToolCall(params)
-		sendResponse(req.ID, result)
-
+		sendResponse(req.ID, executeToolCall(params))
 	default:
 		sendError(req.ID, -32601, fmt.Sprintf("Method not found: %s", req.Method))
 	}
 }
 
 func executeToolCall(params ToolCallParams) CallToolResult {
-	ensureLightpandaRunning()
-
 	switch params.Name {
 	case "lightpanda_status":
-		return CallToolResult{
-			Content: []TextContent{{Type: "text", Text: checkLightpandaStatus()}},
-		}
-
-	case "lightpanda_fetch_html":
+		return textResult(checkLightpandaStatus())
+	case "fetch_html", "lightpanda_render_html":
 		var args struct {
 			URL string `json:"url"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil {
 			return errorResult(fmt.Sprintf("Invalid arguments: %v", err))
 		}
-
-		html, err := fetchHTML(args.URL)
+		target, err := validateURL(args.URL)
 		if err != nil {
-			return errorResult(fmt.Sprintf("Fetch error: %v", err))
+			return errorResult(err.Error())
 		}
-		return CallToolResult{
-			Content: []TextContent{{Type: "text", Text: html}},
+		var body string
+		if params.Name == "fetch_html" {
+			body, err = fetchHTML(target)
+		} else {
+			body, err = renderHTML(target)
 		}
-
-	case "lightpanda_get_markdown":
-		var args struct {
-			URL string `json:"url"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return errorResult(fmt.Sprintf("Invalid arguments: %v", err))
-		}
-
-		md, err := fetchMarkdown(args.URL)
 		if err != nil {
-			return errorResult(fmt.Sprintf("Markdown error: %v", err))
+			return errorResult(err.Error())
 		}
-		return CallToolResult{
-			Content: []TextContent{{Type: "text", Text: md}},
-		}
-
-	case "lightpanda_execute_js":
-		var args struct {
-			URL    string `json:"url"`
-			Script string `json:"script"`
-		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil {
-			return errorResult(fmt.Sprintf("Invalid arguments: %v", err))
-		}
-
-		out, err := executeJS(args.URL, args.Script)
-		if err != nil {
-			return errorResult(fmt.Sprintf("JS execution error: %v", err))
-		}
-		return CallToolResult{
-			Content: []TextContent{{Type: "text", Text: out}},
-		}
-
+		return textResult(body)
 	default:
 		return errorResult(fmt.Sprintf("Unknown tool: %s", params.Name))
 	}
 }
 
-func fetchHTML(targetURL string) (string, error) {
-	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest("GET", targetURL, nil)
+// validateURL accepts only absolute http(s) URLs with a host, so that file://,
+// javascript: or option-like values never reach the network or a subprocess.
+func validateURL(raw string) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid URL: %v", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", errors.New("invalid URL: only http and https are allowed")
+	}
+	if parsed.Host == "" {
+		return "", errors.New("invalid URL: host is required")
+	}
+	return parsed.String(), nil
+}
+
+func fetchHTML(target string) (string, error) {
+	client := &http.Client{Timeout: fetchTimeout}
+	req, err := http.NewRequest(http.MethodGet, target, nil)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Lightpanda-MCP/1.0")
+	req.Header.Set("User-Agent", "lightpanda-mcp-server/"+serverVersion)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("fetch failed: %v", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return "", fmt.Errorf("fetch failed: HTTP %d", resp.StatusCode)
+	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("fetch failed: %v", err)
+	}
+	if len(body) > maxResponseBytes {
+		return "", fmt.Errorf("fetch failed: response larger than %d bytes", maxResponseBytes)
 	}
 	return string(body), nil
 }
 
-func fetchMarkdown(targetURL string) (string, error) {
-	cmd := exec.Command("wsl", "lightpanda", "fetch", targetURL)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	err := cmd.Run()
-	if err != nil {
-		html, fetchErr := fetchHTML(targetURL)
-		if fetchErr != nil {
-			return "", fetchErr
-		}
-		return fmt.Sprintf("# Content from %s\n\n%s", targetURL, html), nil
-	}
-	return out.String(), nil
+// renderArgs builds the Lightpanda invocation without a shell. The URL is a
+// single argument and, being a validated http(s) URL, cannot look like an option.
+func renderArgs(target string) []string {
+	return []string{"fetch", "--dump", target}
 }
 
-func executeJS(targetURL, script string) (string, error) {
-	jsCode := fmt.Sprintf(`
-const { chromium } = require('playwright');
-(async () => {
-  const browser = await chromium.connectOverCDP('ws://%s:%s');
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  await page.goto('%s');
-  const res = await page.evaluate(() => { %s });
-  console.log(JSON.stringify(res, null, 2));
-  await browser.close();
-})();
-`, lightpandaHost, lightpandaPort, targetURL, script)
-
-	cmd := exec.Command("node", "-e", jsCode)
-	var out bytes.Buffer
-	var errOut bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errOut
-
-	err := cmd.Run()
-	if err != nil {
-		return "", fmt.Errorf("evaluation failed: %v, stderr: %s", err, errOut.String())
+func renderHTML(target string) (string, error) {
+	if _, err := exec.LookPath(lightpandaBin); err != nil {
+		return "", fmt.Errorf("Lightpanda binary %q not found: install it from https://lightpanda.io or set LIGHTPANDA_BIN", lightpandaBin)
 	}
-	return out.String(), nil
+	ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
+	defer cancel()
+
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, lightpandaBin, renderArgs(target)...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("render failed: %v: %s", err, bytes.TrimSpace(stderr.Bytes()))
+	}
+	if stdout.Len() > maxResponseBytes {
+		return "", fmt.Errorf("render failed: output larger than %d bytes", maxResponseBytes)
+	}
+	return stdout.String(), nil
 }
 
 func checkLightpandaStatus() string {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(lightpandaHost, lightpandaPort), 2*time.Second)
+	address := net.JoinHostPort(lightpandaHost, lightpandaPort)
+	conn, err := net.DialTimeout("tcp", address, 2*time.Second)
 	if err != nil {
-		return fmt.Sprintf("⚠️ Lightpanda is offline on %s:%s. Run `lightpanda --port 9222` or `wsl lightpanda`.", lightpandaHost, lightpandaPort)
+		return fmt.Sprintf("Lightpanda CDP server is not reachable at %s. Start it bound to localhost, for example: %s serve --host 127.0.0.1 --port %s", address, lightpandaBin, lightpandaPort)
 	}
 	conn.Close()
-	return fmt.Sprintf("✅ Lightpanda CDP server is ONLINE at ws://%s:%s", lightpandaHost, lightpandaPort)
+	return fmt.Sprintf("Lightpanda CDP server is reachable at ws://%s", address)
 }
 
-func ensureLightpandaRunning() {
-	mu.Lock()
-	defer mu.Unlock()
-
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(lightpandaHost, lightpandaPort), 1*time.Second)
-	if err == nil {
-		conn.Close()
-		return
-	}
-
-	go func() {
-		exec.Command("wsl", "lightpanda", "--port", lightpandaPort).Run()
-	}()
-	time.Sleep(500 * time.Millisecond)
+func textResult(text string) CallToolResult {
+	return CallToolResult{Content: []TextContent{{Type: "text", Text: text}}}
 }
 
 func errorResult(msg string) CallToolResult {
-	return CallToolResult{
-		Content: []TextContent{{Type: "text", Text: msg}},
-		IsError: true,
-	}
+	return CallToolResult{Content: []TextContent{{Type: "text", Text: msg}}, IsError: true}
 }
 
 func sendResponse(id interface{}, result interface{}) {
-	resp := Response{
-		JSONRPC: "2.0",
-		ID:      id,
-		Result:  result,
-	}
-	data, _ := json.Marshal(resp)
-	os.Stdout.Write(append(data, '\n'))
+	writeMessage(Response{JSONRPC: "2.0", ID: id, Result: result})
 }
 
 func sendError(id interface{}, code int, message string) {
-	resp := Response{
-		JSONRPC: "2.0",
-		ID:      id,
-		Error: &RPCError{
-			Code:    code,
-			Message: message,
-		},
+	writeMessage(Response{JSONRPC: "2.0", ID: id, Error: &RPCError{Code: code, Message: message}})
+}
+
+func writeMessage(resp Response) {
+	data, err := json.Marshal(resp)
+	if err != nil {
+		data, _ = json.Marshal(Response{JSONRPC: "2.0", ID: resp.ID, Error: &RPCError{Code: -32603, Message: "Internal error"}})
 	}
-	data, _ := json.Marshal(resp)
-	os.Stdout.Write(append(data, '\n'))
+	output.Write(append(data, '\n'))
 }
