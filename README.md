@@ -79,10 +79,15 @@ JavaScript execution may return later through a CDP client that sends the script
 - Script evaluation through CDP with explicit opt-in.
 - Release binaries for Linux, macOS, and Windows.
 
+## Related work
+
+- [llm-agent-eval](https://github.com/Brilhante29/llm-agent-eval): measuring tool-using LLM agents from observed traces.
+- [rag-knowledge-base](https://github.com/Brilhante29/rag-knowledge-base): a retrieval layer with reproducible evaluation.
+
 ## Author
 
 **Guilherme Brilhante**, software engineer working on scalable backends and production AI.
-[LinkedIn](https://www.linkedin.com/in/guilhermefreirebrilhanteseveriano/) · [GitHub](https://github.com/Brilhante29)
+[LinkedIn](https://www.linkedin.com/in/guilhermefreirebrilhanteseveriano/) · [GitHub](https://github.com/Brilhante29) · [Publications](https://dblp.org/pid/353/6812.html)
 
 ## License
 
